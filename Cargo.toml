@@ -6,7 +6,7 @@ members = [
     "modules/axconfig",
     "modules/axdisplay",
     "modules/axdriver",
-    "modules/axfs",
+    "modules/axfs-ng",
     "modules/axhal",
     "modules/axlog",
     "modules/axmm",
@@ -54,7 +54,7 @@ axalloc = { path = "modules/axalloc" }
 axconfig = { path = "modules/axconfig" }
 axdisplay = { path = "modules/axdisplay" }
 axdriver = { path = "modules/axdriver" }
-axfs = { path = "modules/axfs" }
+axfs-ng = { path = "modules/axfs-ng", default-features = false, features = ["fat", "thread-local"] }
 axhal = { path = "modules/axhal" }
 axlog = { path = "modules/axlog" }
 axmm = { path = "modules/axmm" }
@@ -64,6 +64,8 @@ axruntime = { path = "modules/axruntime" }
 axsync = { path = "modules/axsync" }
 axtask = { path = "modules/axtask" }
 axdma = { path = "modules/axdma" }
+
+axfs-ng-vfs = { git = "https://github.com/Mivik/axfs-ng-vfs", rev = "df6495a" }
 
 [profile.release]
 lto = true
