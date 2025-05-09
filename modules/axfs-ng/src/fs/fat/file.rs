@@ -61,18 +61,36 @@ impl<M: RawMutex + 'static> NodeOps<M> for FatFileNode<M> {
     }
 }
 impl<M: RawMutex + 'static> FileNodeOps<M> for FatFileNode<M> {
-    fn read_at(&self, buf: &mut [u8], offset: u64) -> VfsResult<usize> {
+    fn read_at(&self, mut buf: &mut [u8], offset: u64) -> VfsResult<usize> {
         let fs = self.fs.lock();
         let file = self.inner.borrow_mut(&fs);
         file.seek(SeekFrom::Start(offset)).map_err(into_vfs_err)?;
-        file.read(buf).map_err(into_vfs_err)
+
+        let mut read = 0;
+        loop {
+            let n = file.read(buf).map_err(into_vfs_err)?;
+            if n == 0 {
+                return Ok(read);
+            }
+            read += n;
+            buf = &mut buf[n..];
+        }
     }
 
-    fn write_at(&self, buf: &[u8], offset: u64) -> VfsResult<usize> {
+    fn write_at(&self, mut buf: &[u8], offset: u64) -> VfsResult<usize> {
         let fs = self.fs.lock();
         let file = self.inner.borrow_mut(&fs);
         file.seek(SeekFrom::Start(offset)).map_err(into_vfs_err)?;
-        file.write(buf).map_err(into_vfs_err)
+
+        let mut written = 0;
+        loop {
+            let n = file.write(buf).map_err(into_vfs_err)?;
+            if n == 0 {
+                return Ok(written);
+            }
+            written += n;
+            buf = &buf[n..];
+        }
     }
 
     fn append(&self, buf: &[u8]) -> VfsResult<(usize, u64)> {

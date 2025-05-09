@@ -23,9 +23,11 @@ impl BlockDevice for Ext4Disk {
     }
 
     fn write_blocks(&mut self, block_id: u64, buf: &[u8]) -> Ext4Result<usize> {
+        let mut block_buf = [0u8; EXT4_DEV_BSIZE];
         for (i, block) in buf.chunks(EXT4_DEV_BSIZE).enumerate() {
+            block_buf.copy_from_slice(block);
             self.0
-                .write_block(block_id + i as u64, block)
+                .write_block(block_id + i as u64, &block_buf)
                 .map_err(|_| Ext4Error::new(EIO as _, None))?;
         }
         Ok(buf.len())

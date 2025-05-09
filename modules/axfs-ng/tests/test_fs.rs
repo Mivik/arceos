@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use axdriver_block::ramdisk::RamDisk;
 use axfs_ng::{File, FsContext, fs};
 use axfs_ng_vfs::{Filesystem, NodePermission, NodeType, Path, VfsError, VfsResult};
+use axio::Read;
 
 type RawMutex = spin::Mutex<()>;
 
@@ -57,7 +58,7 @@ fn test_fs_read(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
     let mut buf = vec![];
     file.read_to_end(&mut buf)?;
     drop(file);
-    assert_eq!(str::from_utf8(&buf).unwrap(), "Rust is cool!\n");
+    assert_eq!(core::str::from_utf8(&buf).unwrap(), "Rust is cool!\n");
 
     Ok(())
 }
@@ -79,7 +80,7 @@ fn test_fs_write(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
     )?;
     assert!(matches!(
         cx.rename("temp2", "temp"),
-        Err(VfsError::ENOTEMPTY)
+        Err(VfsError::DirectoryNotEmpty)
     ));
 
     Ok(())
