@@ -168,7 +168,10 @@ pub extern "C" fn rust_main(cpu_id: usize, dtb: usize) -> ! {
                 .expect("No block device found!");
             info!("Block device: {}", dev.device_name());
             let fs = axfs_ng::fs::new_default(dev).expect("Failed to initialize filesystem");
-            axfs_ng::FS_CONTEXT.init_new(axsync::Mutex::new(axfs_ng::FsContext::new_root(fs)));
+            let mount = axfs_ng_vfs::Mountpoint::new_root(&fs);
+            axfs_ng::FS_CONTEXT.init_new(axsync::Mutex::new(axfs_ng::FsContext::new(
+                mount.root_location(),
+            )));
         }
 
         #[cfg(feature = "net")]

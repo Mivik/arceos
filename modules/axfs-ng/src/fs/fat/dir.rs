@@ -2,8 +2,8 @@ use core::{any::Any, mem, ops::Deref, time::Duration};
 
 use alloc::{string::String, sync::Arc};
 use axfs_ng_vfs::{
-    DirEntry, DirEntryVisitor, DirNode, DirNodeOps, FilesystemOps, Metadata, NodeOps,
-    NodePermission, NodeType, Reference, VfsError, VfsResult, WeakDirEntry,
+    DirEntry, DirEntrySink, DirNode, DirNodeOps, FilesystemOps, Metadata, NodeOps, NodePermission,
+    NodeType, Reference, VfsError, VfsResult, WeakDirEntry,
 };
 use lock_api::RawMutex;
 
@@ -13,6 +13,9 @@ use super::{
     fs::FatFilesystem,
     util::{file_metadata, into_vfs_err},
 };
+
+// TODO: inode
+const DUMMY_INODE: u64 = 1;
 
 pub struct FatDirNode<M> {
     fs: Arc<FatFilesystem<M>>,
@@ -30,7 +33,7 @@ impl<M: RawMutex + 'static> FatDirNode<M> {
     }
 
     fn create_entry(&self, entry: ff::DirEntry, name: impl Into<String>) -> DirEntry<M> {
-        let reference = Reference::new(Some(self.this.clone()), name.into());
+        let reference = Reference::new(self.this.upgrade(), name.into());
         if entry.is_file() {
             DirEntry::new_file(
                 FatFileNode::new(self.fs.clone(), entry.to_file()),
@@ -51,8 +54,7 @@ unsafe impl<M> Sync for FatDirNode<M> {}
 
 impl<M: RawMutex + 'static> NodeOps<M> for FatDirNode<M> {
     fn inode(&self) -> u64 {
-        // TODO: implement this
-        1
+        DUMMY_INODE
     }
 
     /// Get the metadata of the file.
@@ -96,14 +98,19 @@ impl<M: RawMutex + 'static> NodeOps<M> for FatDirNode<M> {
     }
 }
 impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
-    fn read_dir(&self, offset: u64, mut visitor: DirEntryVisitor<'_, M>) -> VfsResult<usize> {
+    fn read_dir(&self, offset: u64, sink: &mut dyn DirEntrySink) -> VfsResult<usize> {
         let fs = self.fs.lock();
         let dir = self.inner.borrow(&fs);
         let mut count = 0;
         for entry in dir.iter().skip(offset as usize) {
             let entry = entry.map_err(into_vfs_err)?;
             let name = entry.file_name().to_ascii_lowercase();
-            if !visitor.accept_with(name, offset + count + 1, |name| self.create_entry(entry, name)) {
+            let node_type = if entry.is_file() {
+                NodeType::RegularFile
+            } else {
+                NodeType::Directory
+            };
+            if !sink.accept(&name, DUMMY_INODE, node_type, offset + count + 1) {
                 break;
             }
             count += 1;
@@ -117,7 +124,7 @@ impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
         dir.iter()
             .find_map(|entry| entry.ok().filter(|it| it.eq_name(name)))
             .map(|entry| self.create_entry(entry, name.to_ascii_lowercase()))
-            .ok_or(VfsError::NotFound)
+            .ok_or(VfsError::ENOENT)
     }
 
     fn create(
@@ -128,7 +135,7 @@ impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
     ) -> VfsResult<DirEntry<M>> {
         let fs = self.fs.lock();
         let dir = self.inner.borrow(&fs);
-        let reference = Reference::new(Some(self.this.clone()), name.to_ascii_lowercase());
+        let reference = Reference::new(self.this.upgrade(), name.to_ascii_lowercase());
         match node_type {
             NodeType::RegularFile => dir
                 .create_file(name)
@@ -149,14 +156,14 @@ impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
                     )
                 })
                 .map_err(into_vfs_err),
-            _ => Err(VfsError::InvalidInput),
+            _ => Err(VfsError::EINVAL),
         }
     }
 
     fn link(&self, _name: &str, _node: &DirEntry<M>) -> VfsResult<DirEntry<M>> {
         //  EPERM  The filesystem containing oldpath and newpath does not
         //         support the creation of hard links.
-        Err(VfsError::PermissionDenied)
+        Err(VfsError::EPERM)
     }
 
     fn unlink(&self, name: &str) -> VfsResult<()> {
@@ -167,7 +174,7 @@ impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
 
     fn rename(&self, src_name: &str, dst_dir: &DirNode<M>, dst_name: &str) -> VfsResult<()> {
         let fs = self.fs.lock();
-        let dst_dir: Arc<Self> = dst_dir.downcast().map_err(|_| VfsError::InvalidInput)?;
+        let dst_dir: Arc<Self> = dst_dir.downcast().map_err(|_| VfsError::EINVAL)?;
 
         let dir = self.inner.borrow(&fs);
 

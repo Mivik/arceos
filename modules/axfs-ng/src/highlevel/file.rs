@@ -1,6 +1,8 @@
 use core::fmt;
 
-use axfs_ng_vfs::{DirEntry, FileNode, Metadata, NodePermission, Path, VfsError, VfsResult};
+use axfs_ng_vfs::{
+    DirEntry, FileNode, Location, Metadata, NodePermission, VfsError, VfsResult, path::Path,
+};
 use axio::SeekFrom;
 use lock_api::RawMutex;
 
@@ -19,20 +21,20 @@ bitflags::bitflags! {
 /// Results returned by [`OpenOptions::open`].
 pub enum OpenResult<M> {
     File(File<M>),
-    Dir(DirEntry<M>),
+    Dir(Location<M>),
 }
 impl<M> OpenResult<M> {
     pub fn into_file(self) -> VfsResult<File<M>> {
         match self {
             Self::File(file) => Ok(file),
-            Self::Dir(_) => Err(VfsError::IsADirectory),
+            Self::Dir(_) => Err(VfsError::EISDIR),
         }
     }
 
-    pub fn into_dir(self) -> VfsResult<DirEntry<M>> {
+    pub fn into_dir(self) -> VfsResult<Location<M>> {
         match self {
             Self::Dir(dir) => Ok(dir),
-            Self::File(_) => Err(VfsError::NotADirectory),
+            Self::File(_) => Err(VfsError::ENOTDIR),
         }
     }
 }
@@ -141,29 +143,32 @@ impl OpenOptions {
     }
     fn _open<M: RawMutex>(&self, context: &FsContext<M>, path: &Path) -> VfsResult<OpenResult<M>> {
         if !self.is_valid() {
-            return Err(VfsError::InvalidData);
+            return Err(VfsError::EINVAL);
         }
         let flags = self.to_flags()?;
         if self.directory {
             if flags.contains(FileFlags::WRITE) {
-                return Err(VfsError::IsADirectory);
+                return Err(VfsError::EISDIR);
             }
             return context
                 .resolve(path)
                 .and_then(|it| {
-                    it.as_dir()?;
+                    it.check_is_dir()?;
                     Ok(it)
                 })
                 .map(OpenResult::Dir);
         }
 
         let (parent, name) = context.resolve_parent(path.as_ref())?;
-        let entry = parent.as_dir()?.open_file_or_create(
-            &name,
-            self.create,
-            self.create_new,
-            NodePermission::from_bits_truncate(self.mode as _),
-        )?;
+        let entry = parent
+            .open_file_or_create(
+                &name,
+                self.create,
+                self.create_new,
+                NodePermission::from_bits_truncate(self.mode as _),
+            )?
+            .entry()
+            .clone();
         if self.truncate {
             entry.as_file()?.set_len(0)?;
         }
@@ -178,7 +183,7 @@ impl OpenOptions {
             (true, true, false) => FileFlags::READ | FileFlags::WRITE,
             (false, _, true) => FileFlags::WRITE | FileFlags::APPEND,
             (true, _, true) => FileFlags::READ | FileFlags::WRITE | FileFlags::APPEND,
-            (false, false, false) => return Err(VfsError::InvalidData),
+            (false, false, false) => return Err(VfsError::EINVAL),
         })
     }
 
@@ -266,8 +271,7 @@ impl<M: RawMutex> File<M> {
         if self.flags.contains(cap) {
             self.inner.as_file()
         } else {
-            // TODO: should return EBADF
-            Err(VfsError::PermissionDenied)
+            Err(VfsError::EBADF)
         }
     }
 
@@ -318,17 +322,36 @@ impl<M: RawMutex> File<M> {
     }
 }
 
+fn vfs_error_to_axio(err: VfsError) -> axio::Error {
+    match err {
+        VfsError::EEXIST => axio::Error::AlreadyExists,
+        VfsError::ENOTEMPTY => axio::Error::DirectoryNotEmpty,
+        VfsError::EINVAL => axio::Error::InvalidInput,
+        VfsError::EISDIR => axio::Error::IsADirectory,
+        VfsError::ENOMEM => axio::Error::NoMemory,
+        VfsError::ENOTDIR => axio::Error::NotADirectory,
+        VfsError::ENOENT => axio::Error::NotFound,
+        VfsError::EBADF => axio::Error::PermissionDenied,
+        VfsError::ENOSPC => axio::Error::StorageFull,
+        VfsError::ENOSYS | VfsError::EOPNOTSUPP => axio::Error::Unsupported,
+        _ => axio::Error::Io,
+    }
+}
+
 impl<M: RawMutex> axio::Read for File<M> {
     fn read(&mut self, buf: &mut [u8]) -> axio::Result<usize> {
-        self.read_at(buf, self.position).inspect(|n| {
-            self.position += *n as u64;
-        })
+        self.read_at(buf, self.position)
+            .inspect(|n| {
+                self.position += *n as u64;
+            })
+            .map_err(vfs_error_to_axio)
     }
 }
 impl<M: RawMutex> axio::Write for File<M> {
     fn write(&mut self, buf: &[u8]) -> axio::Result<usize> {
         if self.flags.contains(FileFlags::APPEND) {
-            self.access(FileFlags::WRITE)?
+            self.access(FileFlags::WRITE)
+                .map_err(vfs_error_to_axio)?
                 .append(buf)
                 .map(|(written, offset)| {
                     self.position = offset;
@@ -339,6 +362,7 @@ impl<M: RawMutex> axio::Write for File<M> {
                 self.position += *n as u64;
             })
         }
+        .map_err(vfs_error_to_axio)
     }
 
     fn flush(&mut self) -> axio::Result {
@@ -347,22 +371,25 @@ impl<M: RawMutex> axio::Write for File<M> {
 }
 impl<M: RawMutex> axio::Seek for File<M> {
     fn seek(&mut self, pos: SeekFrom) -> axio::Result<u64> {
-        let new_pos = match pos {
-            SeekFrom::Start(pos) => pos,
-            SeekFrom::End(off) => {
-                let size = self.access(FileFlags::READ)?.len()?;
-                size.checked_add_signed(off)
-                    .ok_or(VfsError::InvalidInput)?
-                    .clamp(0, size)
-            }
-            SeekFrom::Current(off) => {
-                let size = self.access(FileFlags::READ)?.len()?;
-                self.position
-                    .checked_add_signed(off)
-                    .ok_or(VfsError::InvalidInput)?
-                    .clamp(0, size)
-            }
-        };
+        let new_pos = (|| {
+            Ok(match pos {
+                SeekFrom::Start(pos) => pos,
+                SeekFrom::End(off) => {
+                    let size = self.access(FileFlags::READ)?.len()?;
+                    size.checked_add_signed(off)
+                        .ok_or(VfsError::EINVAL)?
+                        .clamp(0, size)
+                }
+                SeekFrom::Current(off) => {
+                    let size = self.access(FileFlags::READ)?.len()?;
+                    self.position
+                        .checked_add_signed(off)
+                        .ok_or(VfsError::EINVAL)?
+                        .clamp(0, size)
+                }
+            })
+        })()
+        .map_err(vfs_error_to_axio)?;
         self.position = new_pos;
         Ok(new_pos)
     }

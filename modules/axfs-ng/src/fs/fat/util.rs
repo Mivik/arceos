@@ -84,15 +84,14 @@ pub fn file_metadata(file: &ff::File, node_type: NodeType) -> Metadata {
 pub fn into_vfs_err<E>(err: fatfs::Error<E>) -> VfsError {
     use fatfs::Error::*;
     match err {
-        AlreadyExists => VfsError::AlreadyExists,
-        CorruptedFileSystem => VfsError::InvalidData,
-        DirectoryIsNotEmpty => VfsError::DirectoryNotEmpty,
-        // TODO: should return ENAMETOOLONG
-        InvalidFileNameLength => VfsError::InvalidData,
-        InvalidInput | UnsupportedFileNameCharacter => VfsError::InvalidData,
-        NotEnoughSpace => VfsError::StorageFull,
-        NotFound => VfsError::NotFound,
-        UnexpectedEof | WriteZero => VfsError::Io,
-        _ => VfsError::Io,
+        AlreadyExists => VfsError::EEXIST,
+        CorruptedFileSystem => VfsError::EINVAL,
+        DirectoryIsNotEmpty => VfsError::ENOTEMPTY,
+        InvalidFileNameLength => VfsError::ENAMETOOLONG,
+        InvalidInput | UnsupportedFileNameCharacter => VfsError::EINVAL,
+        NotEnoughSpace => VfsError::ENOSPC,
+        NotFound => VfsError::ENOENT,
+        UnexpectedEof | WriteZero => VfsError::EIO,
+        _ => VfsError::EIO,
     }
 }

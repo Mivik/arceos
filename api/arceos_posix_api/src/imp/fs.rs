@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 use axfs_ng::{FS_CONTEXT, FsContext, OpenOptions, OpenResult};
-use axfs_ng_vfs::{DirEntry, Metadata};
+use axfs_ng_vfs::{DirEntry, Location, Metadata};
 use core::ffi::{c_char, c_int};
 
 use axerrno::{LinuxError, LinuxResult};
@@ -302,19 +302,19 @@ pub fn sys_rename(old: *const c_char, new: *const c_char) -> c_int {
 
 /// Directory wrapper for `axfs::fops::Directory`.
 pub struct Directory {
-    inner: DirEntry<RawMutex>,
+    inner: Location<RawMutex>,
     pub offset: Mutex<u64>,
 }
 
 impl Directory {
-    fn new(inner: DirEntry<RawMutex>) -> Self {
+    fn new(inner: Location<RawMutex>) -> Self {
         Self {
             inner,
             offset: Mutex::new(0),
         }
     }
 
-    pub fn inner(&self) -> &DirEntry<RawMutex> {
+    pub fn inner(&self) -> &Location<RawMutex> {
         &self.inner
     }
 

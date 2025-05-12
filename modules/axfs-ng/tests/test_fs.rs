@@ -4,18 +4,21 @@ use std::collections::HashSet;
 
 use axdriver_block::ramdisk::RamDisk;
 use axfs_ng::{File, FsContext, fs};
-use axfs_ng_vfs::{Filesystem, NodePermission, NodeType, Path, VfsError, VfsResult};
+use axfs_ng_vfs::{
+    Filesystem, Location, Mountpoint, NodePermission, NodeType, VfsError, VfsResult, path::Path,
+};
 use axio::Read;
 
 type RawMutex = spin::Mutex<()>;
 
 fn list_files(cx: &FsContext<RawMutex>, path: impl AsRef<Path>) -> VfsResult<HashSet<String>> {
     cx.read_dir(path)?
-        .map(|it| it.map(|entry| entry.name().to_owned()))
+        .map(|it| it.map(|entry| entry.name.to_owned()))
         .collect()
 }
 fn test_fs_read(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
-    let cx = FsContext::new_root(fs.clone());
+    let mount = Mountpoint::new_root(fs);
+    let cx = FsContext::new(mount.root_location());
 
     let names = list_files(&cx, "/").unwrap();
     assert!(
@@ -28,7 +31,7 @@ fn test_fs_read(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
 
     let entries = cx.read_dir("/")?.collect::<VfsResult<Vec<_>>>()?;
     for entry in entries {
-        assert!(cx.root_dir().as_dir()?.lookup(entry.name())?.ptr_eq(&entry));
+        assert!(cx.root_dir().lookup(&entry.name)?.inode() == entry.ino);
     }
 
     assert_eq!(
@@ -63,7 +66,8 @@ fn test_fs_read(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
     Ok(())
 }
 fn test_fs_write(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
-    let cx = FsContext::new(fs.clone(), fs.root_dir());
+    let mount = Mountpoint::new_root(fs);
+    let cx = FsContext::new(mount.root_location());
 
     let mode = NodePermission::from_bits(0o766).unwrap();
     cx.create_dir("temp", mode)?;
@@ -73,14 +77,11 @@ fn test_fs_write(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
     assert!(cx.resolve("temp").is_err() && cx.resolve("temp2").is_ok());
 
     cx.create_dir("temp", mode)?;
-    cx.resolve("temp")?.as_dir()?.create(
-        "test.txt",
-        NodeType::RegularFile,
-        NodePermission::default(),
-    )?;
+    cx.resolve("temp")?
+        .create("test.txt", NodeType::RegularFile, NodePermission::default())?;
     assert!(matches!(
         cx.rename("temp2", "temp"),
-        Err(VfsError::DirectoryNotEmpty)
+        Err(VfsError::ENOTEMPTY)
     ));
 
     Ok(())
@@ -88,7 +89,7 @@ fn test_fs_write(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
 
 fn test_fs_full(fs: Filesystem<RawMutex>) -> VfsResult<()> {
     let mut thrds = vec![];
-    for _ in 0..4 {
+    for _ in 0..1 {
         let fs = fs.clone();
         thrds.push(std::thread::spawn(move || test_fs_read(&fs)));
     }

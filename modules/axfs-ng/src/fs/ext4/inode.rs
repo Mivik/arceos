@@ -2,7 +2,7 @@ use core::any::Any;
 
 use alloc::{borrow::ToOwned, string::String, sync::Arc};
 use axfs_ng_vfs::{
-    DirEntry, DirEntryVisitor, DirNode, DirNodeOps, FileNode, FileNodeOps, FilesystemOps, Metadata,
+    DirEntry, DirEntrySink, DirNode, DirNodeOps, FileNode, FileNodeOps, FilesystemOps, Metadata,
     NodeOps, NodePermission, NodeType, Reference, VfsError, VfsResult, WeakDirEntry,
 };
 use lock_api::RawMutex;
@@ -28,7 +28,10 @@ impl<M: RawMutex + Send + Sync + 'static> Inode<M> {
     }
 
     fn create_entry(&self, entry: &lwext4_rust::DirEntry, name: impl Into<String>) -> DirEntry<M> {
-        let reference = Reference::new(self.this.clone(), name.into());
+        let reference = Reference::new(
+            self.this.as_ref().and_then(WeakDirEntry::upgrade),
+            name.into(),
+        );
         if entry.inode_type() == InodeType::Directory {
             DirEntry::new_dir(
                 |this| DirNode::new(Inode::new(self.fs.clone(), entry.ino(), Some(this))),
@@ -124,17 +127,20 @@ impl<M: RawMutex + Send + Sync + 'static> FileNodeOps<M> for Inode<M> {
     }
 }
 impl<M: RawMutex + Send + Sync + 'static> DirNodeOps<M> for Inode<M> {
-    fn read_dir(&self, offset: u64, mut visitor: DirEntryVisitor<'_, M>) -> VfsResult<usize> {
+    fn read_dir(&self, offset: u64, sink: &mut dyn DirEntrySink) -> VfsResult<usize> {
         let mut fs = self.fs.lock();
         let mut reader = fs.read_dir(self.ino, offset).map_err(into_vfs_err)?;
         let mut count = 0;
         while let Some(entry) = reader.current() {
             let name = core::str::from_utf8(entry.name())
-                .map_err(|_| VfsError::InvalidData)?
+                .map_err(|_| VfsError::EINVAL)?
                 .to_owned();
-            if !visitor.accept_with(name, reader.offset() + entry.len() as u64, |name| {
-                self.create_entry(&entry, name)
-            }) {
+            if !sink.accept(
+                &name,
+                entry.ino() as u64,
+                into_vfs_type(entry.inode_type()),
+                reader.offset() + entry.len() as u64,
+            ) {
                 break;
             }
             count += 1;
@@ -165,14 +171,17 @@ impl<M: RawMutex + Send + Sync + 'static> DirNodeOps<M> for Inode<M> {
             NodeType::Symlink => InodeType::Symlink,
             NodeType::Socket => InodeType::Socket,
             NodeType::Unknown => {
-                return Err(VfsError::InvalidInput);
+                return Err(VfsError::EINVAL);
             }
         };
         let mut fs = self.fs.lock();
         let ino = fs
             .create(self.ino, name, inode_type, permission.bits() as _)
             .map_err(into_vfs_err)?;
-        let reference = Reference::new(self.this.clone(), name.to_owned());
+        let reference = Reference::new(
+            self.this.as_ref().and_then(WeakDirEntry::upgrade),
+            name.to_owned(),
+        );
         Ok(if node_type == NodeType::Directory {
             DirEntry::new_dir(
                 |this| DirNode::new(Inode::new(self.fs.clone(), ino, Some(this))),
@@ -199,7 +208,7 @@ impl<M: RawMutex + Send + Sync + 'static> DirNodeOps<M> for Inode<M> {
     }
 
     fn rename(&self, src_name: &str, dst_dir: &DirNode<M>, dst_name: &str) -> VfsResult<()> {
-        let dst_dir: Arc<Self> = dst_dir.downcast().map_err(|_| VfsError::InvalidInput)?;
+        let dst_dir: Arc<Self> = dst_dir.downcast().map_err(|_| VfsError::EINVAL)?;
         self.fs
             .lock()
             .rename(self.ino, src_name, dst_dir.ino, dst_name)
