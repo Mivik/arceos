@@ -14,47 +14,56 @@ use super::{
     util::{file_metadata, into_vfs_err},
 };
 
-// TODO: inode
-const DUMMY_INODE: u64 = 1;
-
-pub struct FatDirNode<M> {
+pub struct FatDirNode<M: RawMutex + 'static> {
     fs: Arc<FatFilesystem<M>>,
     pub(crate) inner: FsRef<ff::Dir<'static>>,
+    inode: u64,
     this: WeakDirEntry<M>,
 }
 impl<M: RawMutex + 'static> FatDirNode<M> {
-    pub fn new(fs: Arc<FatFilesystem<M>>, dir: ff::Dir, this: WeakDirEntry<M>) -> DirNode<M> {
+    pub fn new(
+        fs: Arc<FatFilesystem<M>>,
+        dir: ff::Dir,
+        inode: u64,
+        this: WeakDirEntry<M>,
+    ) -> DirNode<M> {
         DirNode::new(Arc::new(Self {
             fs,
             // SAFETY: FsRef guarantees correct lifetime
             inner: FsRef::new(unsafe { mem::transmute(dir) }),
+            inode,
             this,
         }))
     }
 
-    fn create_entry(&self, entry: ff::DirEntry, name: impl Into<String>) -> DirEntry<M> {
+    fn create_entry(
+        &self,
+        entry: ff::DirEntry,
+        name: impl Into<String>,
+        inode: u64,
+    ) -> DirEntry<M> {
         let reference = Reference::new(self.this.upgrade(), name.into());
         if entry.is_file() {
             DirEntry::new_file(
-                FatFileNode::new(self.fs.clone(), entry.to_file()),
+                FatFileNode::new(self.fs.clone(), entry.to_file(), inode),
                 NodeType::RegularFile,
                 reference,
             )
         } else {
             DirEntry::new_dir(
-                |this| FatDirNode::new(self.fs.clone(), entry.to_dir(), this),
+                |this| FatDirNode::new(self.fs.clone(), entry.to_dir(), inode, this),
                 reference,
             )
         }
     }
 }
 
-unsafe impl<M> Send for FatDirNode<M> {}
-unsafe impl<M> Sync for FatDirNode<M> {}
+unsafe impl<M: RawMutex + 'static> Send for FatDirNode<M> {}
+unsafe impl<M: RawMutex + 'static> Sync for FatDirNode<M> {}
 
 impl<M: RawMutex + 'static> NodeOps<M> for FatDirNode<M> {
     fn inode(&self) -> u64 {
-        DUMMY_INODE
+        self.inode
     }
 
     /// Get the metadata of the file.
@@ -68,7 +77,6 @@ impl<M: RawMutex + 'static> NodeOps<M> for FatDirNode<M> {
         // root directory
         let block_size = fs.inner.bytes_per_sector() as u64;
         Ok(Metadata {
-            // TODO: inode
             inode: self.inode(),
             device: 0,
             nlink: 1,
@@ -99,8 +107,11 @@ impl<M: RawMutex + 'static> NodeOps<M> for FatDirNode<M> {
 }
 impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
     fn read_dir(&self, offset: u64, sink: &mut dyn DirEntrySink) -> VfsResult<usize> {
-        let fs = self.fs.lock();
+        let mut fs = self.fs.lock();
         let dir = self.inner.borrow(&fs);
+        let this_entry = self.this.upgrade().unwrap();
+        let dir_node = this_entry.as_dir()?;
+
         let mut count = 0;
         for entry in dir.iter().skip(offset as usize) {
             let entry = entry.map_err(into_vfs_err)?;
@@ -110,7 +121,15 @@ impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
             } else {
                 NodeType::Directory
             };
-            if !sink.accept(&name, DUMMY_INODE, node_type, offset + count + 1) {
+            let inode = if let Some(entry) = dir_node.lookup_cache(&name) {
+                entry.inode()
+            } else {
+                let entry = self.create_entry(entry, name.clone(), fs.alloc_inode());
+                let inode = entry.inode();
+                dir_node.insert_cache(name.clone(), entry);
+                inode
+            };
+            if !sink.accept(&name, inode, node_type, offset + count + 1) {
                 break;
             }
             count += 1;
@@ -119,11 +138,11 @@ impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
     }
 
     fn lookup(&self, name: &str) -> VfsResult<DirEntry<M>> {
-        let fs = self.fs.lock();
+        let mut fs = self.fs.lock();
         let dir = self.inner.borrow(&fs);
         dir.iter()
             .find_map(|entry| entry.ok().filter(|it| it.eq_name(name)))
-            .map(|entry| self.create_entry(entry, name.to_ascii_lowercase()))
+            .map(|entry| self.create_entry(entry, name.to_ascii_lowercase(), fs.alloc_inode()))
             .ok_or(VfsError::ENOENT)
     }
 
@@ -133,7 +152,7 @@ impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
         node_type: NodeType,
         _permission: NodePermission,
     ) -> VfsResult<DirEntry<M>> {
-        let fs = self.fs.lock();
+        let mut fs = self.fs.lock();
         let dir = self.inner.borrow(&fs);
         let reference = Reference::new(self.this.upgrade(), name.to_ascii_lowercase());
         match node_type {
@@ -141,7 +160,7 @@ impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
                 .create_file(name)
                 .map(|file| {
                     DirEntry::new_file(
-                        FatFileNode::new(self.fs.clone(), file),
+                        FatFileNode::new(self.fs.clone(), file, fs.alloc_inode()),
                         NodeType::RegularFile,
                         reference,
                     )
@@ -151,7 +170,7 @@ impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
                 .create_dir(name)
                 .map(|dir| {
                     DirEntry::new_dir(
-                        |this| FatDirNode::new(self.fs.clone(), dir, this),
+                        |this| FatDirNode::new(self.fs.clone(), dir, fs.alloc_inode(), this),
                         reference,
                     )
                 })
@@ -188,5 +207,11 @@ impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
 
         dir.rename(src_name, dst_dir.inner.borrow(&fs), dst_name)
             .map_err(into_vfs_err)
+    }
+}
+
+impl<M: RawMutex + 'static> Drop for FatDirNode<M> {
+    fn drop(&mut self) {
+        self.fs.lock().release_inode(self.inode);
     }
 }

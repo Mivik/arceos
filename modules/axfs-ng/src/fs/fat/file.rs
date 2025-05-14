@@ -1,7 +1,9 @@
 use core::{any::Any, mem, ops::Deref};
 
 use alloc::{sync::Arc, vec};
-use axfs_ng_vfs::{FileNode, FileNodeOps, FilesystemOps, Metadata, NodeOps, NodeType, VfsError, VfsResult};
+use axfs_ng_vfs::{
+    FileNode, FileNodeOps, FilesystemOps, Metadata, NodeOps, NodeType, VfsError, VfsResult,
+};
 use fatfs::{Read, Seek, SeekFrom, Write};
 use lock_api::RawMutex;
 
@@ -11,27 +13,28 @@ use super::{
     util::{file_metadata, into_vfs_err},
 };
 
-pub struct FatFileNode<M> {
+pub struct FatFileNode<M: RawMutex + 'static> {
     fs: Arc<FatFilesystem<M>>,
     inner: FsRef<ff::File<'static>>,
+    inode: u64,
 }
 impl<M: RawMutex + 'static> FatFileNode<M> {
-    pub fn new(fs: Arc<FatFilesystem<M>>, file: ff::File) -> FileNode<M> {
+    pub fn new(fs: Arc<FatFilesystem<M>>, file: ff::File, inode: u64) -> FileNode<M> {
         FileNode::new(Arc::new(Self {
             fs,
             // SAFETY: FsRef guarantees correct lifetime
             inner: FsRef::new(unsafe { mem::transmute(file) }),
+            inode,
         }))
     }
 }
 
-unsafe impl<M> Send for FatFileNode<M> {}
-unsafe impl<M> Sync for FatFileNode<M> {}
+unsafe impl<M: RawMutex + 'static> Send for FatFileNode<M> {}
+unsafe impl<M: RawMutex + 'static> Sync for FatFileNode<M> {}
 
 impl<M: RawMutex + 'static> NodeOps<M> for FatFileNode<M> {
     fn inode(&self) -> u64 {
-        // TODO: implement this
-        1
+        self.inode
     }
 
     fn metadata(&self) -> VfsResult<Metadata> {
@@ -126,5 +129,11 @@ impl<M: RawMutex + 'static> FileNodeOps<M> for FatFileNode<M> {
 
     fn set_symlink(&self, _target: &str) -> VfsResult<()> {
         Err(VfsError::EPERM)
+    }
+}
+
+impl<M: RawMutex + 'static> Drop for FatFileNode<M> {
+    fn drop(&mut self) {
+        self.fs.lock().release_inode(self.inode);
     }
 }
