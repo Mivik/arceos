@@ -1,6 +1,6 @@
 use core::fmt;
 
-use axfs_ng_vfs::{FileNode, Location, Metadata, NodePermission, VfsError, VfsResult, path::Path};
+use axfs_ng_vfs::{path::Path, FileNode, Location, Metadata, NodePermission, VfsError, VfsResult};
 use axio::SeekFrom;
 use lock_api::RawMutex;
 
@@ -151,18 +151,6 @@ impl OpenOptions {
             return Err(VfsError::EINVAL);
         }
         let flags = self.to_flags()?;
-        if self.directory {
-            if flags.contains(FileFlags::WRITE) {
-                return Err(VfsError::EISDIR);
-            }
-            return context
-                .resolve(path)
-                .and_then(|it| {
-                    it.check_is_dir()?;
-                    Ok(it)
-                })
-                .map(OpenResult::Dir);
-        }
 
         let (parent, name) = context.resolve_parent(path.as_ref())?;
         let loc = parent
@@ -173,11 +161,21 @@ impl OpenOptions {
                 NodePermission::from_bits_truncate(self.mode as _),
             )?
             .clone();
+        if self.directory {
+            if flags.contains(FileFlags::WRITE) {
+                return Err(VfsError::EISDIR);
+            }
+            loc.check_is_dir()?;
+        }
         if self.truncate {
             loc.entry().as_file()?.set_len(0)?;
         }
 
-        Ok(OpenResult::File(File::new(loc, flags)))
+        Ok(if loc.is_dir() {
+            OpenResult::Dir(loc)
+        } else {
+            OpenResult::File(File::new(loc, flags))
+        })
     }
 
     pub(crate) fn to_flags(&self) -> VfsResult<FileFlags> {

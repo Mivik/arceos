@@ -97,7 +97,7 @@ impl OpenOptions {
     pub fn create_new(&mut self, create_new: bool) {
         self.create_new = create_new;
     }
-    /// Sets the option to open a directory.
+    /// Sets the option to fail if the file is not a directory.
     pub fn directory(&mut self, directory: bool) {
         self.directory = directory;
     }
