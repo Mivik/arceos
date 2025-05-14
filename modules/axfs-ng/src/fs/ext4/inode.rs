@@ -120,10 +120,14 @@ impl<M: RawMutex + Send + Sync + 'static> FileNodeOps<M> for Inode<M> {
     }
 
     fn set_len(&self, len: u64) -> VfsResult<()> {
-        if self.len()? != len {
-            todo!();
-        }
-        Ok(())
+        self.fs.lock().set_len(self.ino, len).map_err(into_vfs_err)
+    }
+
+    fn set_symlink(&self, target: &str) -> VfsResult<()> {
+        self.fs
+            .lock()
+            .set_symlink(self.ino, target.as_bytes())
+            .map_err(into_vfs_err)
     }
 }
 impl<M: RawMutex + Send + Sync + 'static> DirNodeOps<M> for Inode<M> {

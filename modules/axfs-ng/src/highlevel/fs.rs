@@ -9,10 +9,12 @@ use lock_api::RawMutex;
 
 use axfs_ng_vfs::{
     Location, Metadata, NodePermission, NodeType, VfsError, VfsResult,
-    path::{Component, Path, PathBuf},
+    path::{Component, Components, Path, PathBuf},
 };
 
 use super::{File, FileFlags};
+
+pub const SYMLINKS_MAX: usize = 40;
 
 #[cfg(feature = "thread-local")]
 axns::def_resource! {
@@ -74,14 +76,34 @@ impl<M: RawMutex> FsContext<M> {
         })
     }
 
-    fn resolve_inner<'a>(&self, path: &'a Path) -> VfsResult<(Location<M>, Option<&'a str>)> {
-        let mut dir = self.current_dir.clone();
-
-        let entry_name = path.file_name();
-        let mut components = path.components();
-        if entry_name.is_some() {
-            components.next_back();
+    fn lookup(
+        &self,
+        dir: &Location<M>,
+        name: &str,
+        follow_count: &mut usize,
+    ) -> VfsResult<Location<M>> {
+        let loc = dir.lookup_no_follow(name)?;
+        if loc.node_type() != NodeType::Symlink {
+            return Ok(loc);
         }
+        if *follow_count >= SYMLINKS_MAX {
+            return Err(VfsError::ELOOP);
+        }
+        *follow_count += 1;
+        let target = loc.read_link()?;
+        if target.is_empty() {
+            return Err(VfsError::ENOENT);
+        }
+        self.with_current_dir(dir.clone())?
+            .resolve_components(PathBuf::from(target).components(), follow_count)
+    }
+
+    fn resolve_components<'a>(
+        &self,
+        components: Components,
+        follow_count: &mut usize,
+    ) -> VfsResult<Location<M>> {
+        let mut dir = self.current_dir.clone();
         for comp in components {
             match comp {
                 Component::CurDir => {}
@@ -92,20 +114,43 @@ impl<M: RawMutex> FsContext<M> {
                     dir = self.root_dir.clone();
                 }
                 Component::Normal(name) => {
-                    dir = dir.lookup(name)?;
+                    dir = self.lookup(&dir, name, follow_count)?;
                 }
             }
         }
+        Ok(dir)
+    }
+
+    fn resolve_inner<'a>(
+        &self,
+        path: &'a Path,
+        follow_count: &mut usize,
+    ) -> VfsResult<(Location<M>, Option<&'a str>)> {
+        let entry_name = path.file_name();
+        let mut components = path.components();
+        if entry_name.is_some() {
+            components.next_back();
+        }
+        let dir = self.resolve_components(components, follow_count)?;
         dir.check_is_dir()?;
         Ok((dir, entry_name))
     }
 
-    /// Taking current node as root directory, resolves a path starting from
-    /// `current_dir`.
+    /// Resolves a path starting from `current_dir`.
     pub fn resolve(&self, path: impl AsRef<Path>) -> VfsResult<Location<M>> {
-        let (dir, name) = self.resolve_inner(path.as_ref())?;
+        let mut follow_count = 0;
+        let (dir, name) = self.resolve_inner(path.as_ref(), &mut follow_count)?;
         match name {
-            Some(name) => dir.lookup(name),
+            Some(name) => self.lookup(&dir, name, &mut follow_count),
+            None => Ok(dir),
+        }
+    }
+
+    /// Resolves a path starting from `current_dir` not following symlinks.
+    pub fn resolve_no_follow(&self, path: impl AsRef<Path>) -> VfsResult<Location<M>> {
+        let (dir, name) = self.resolve_inner(path.as_ref(), &mut 0)?;
+        match name {
+            Some(name) => dir.lookup_no_follow(name),
             None => Ok(dir),
         }
     }
@@ -116,7 +161,7 @@ impl<M: RawMutex> FsContext<M> {
     /// Returns `(parent_dir, entry_name)`, where `entry_name` is the name of
     /// the entry.
     pub fn resolve_parent<'a>(&self, path: &'a Path) -> VfsResult<(Location<M>, Cow<'a, str>)> {
-        let (dir, name) = self.resolve_inner(path)?;
+        let (dir, name) = self.resolve_inner(path, &mut 0)?;
         if let Some(name) = name {
             Ok((dir, Cow::Borrowed(name)))
         } else if let Some(parent) = dir.parent() {
@@ -134,7 +179,7 @@ impl<M: RawMutex> FsContext<M> {
     /// entry's non-existence. It simply raises an error if the entry name is
     /// not present in the path.
     pub fn resolve_nonexistent<'a>(&self, path: &'a Path) -> VfsResult<(Location<M>, &'a str)> {
-        let (dir, name) = self.resolve_inner(path)?;
+        let (dir, name) = self.resolve_inner(path, &mut 0)?;
         if let Some(name) = name {
             Ok((dir, name))
         } else {
@@ -179,7 +224,7 @@ impl<M: RawMutex> FsContext<M> {
 
     /// Removes a file from the filesystem.
     pub fn remove_file(&self, path: impl AsRef<Path>) -> VfsResult<()> {
-        let entry = self.resolve(path.as_ref())?;
+        let entry = self.resolve_no_follow(path.as_ref())?;
         entry
             .parent()
             .ok_or(VfsError::EISDIR)?
@@ -188,7 +233,7 @@ impl<M: RawMutex> FsContext<M> {
 
     /// Removes a directory from the filesystem.
     pub fn remove_dir(&self, path: impl AsRef<Path>) -> VfsResult<()> {
-        let entry = self.resolve(path.as_ref())?;
+        let entry = self.resolve_no_follow(path.as_ref())?;
         entry
             .parent()
             .ok_or(VfsError::EBUSY)?
@@ -221,6 +266,21 @@ impl<M: RawMutex> FsContext<M> {
         let old = self.resolve(old_path.as_ref())?;
         let (new_dir, new_name) = self.resolve_nonexistent(new_path.as_ref())?;
         new_dir.link(new_name, &old)
+    }
+
+    /// Creates a new symbolic link on the filesystem.
+    pub fn symlink(
+        &self,
+        target: impl AsRef<str>,
+        link_path: impl AsRef<Path>,
+    ) -> VfsResult<Location<M>> {
+        let (dir, name) = self.resolve_nonexistent(link_path.as_ref())?;
+        if dir.lookup_no_follow(name).is_ok() {
+            return Err(VfsError::EEXIST);
+        }
+        let symlink = dir.create(name, NodeType::Symlink, NodePermission::default())?;
+        symlink.entry().as_file()?.set_symlink(target.as_ref())?;
+        Ok(symlink)
     }
 
     /// Returns the canonical, absolute form of a path.

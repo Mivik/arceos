@@ -31,7 +31,7 @@ cfg-if = "1.0.0"
 
 [dependencies.lwext4_rust]
 git = "https://github.com/Mivik/lwext4_rust"
-rev = "0741887"
+rev = "dff1c0e"
 default-features = false
 optional = true
 features = ["print"]

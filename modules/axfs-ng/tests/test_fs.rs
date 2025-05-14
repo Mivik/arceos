@@ -31,7 +31,7 @@ fn test_fs_read(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
 
     let entries = cx.read_dir("/")?.collect::<VfsResult<Vec<_>>>()?;
     for entry in entries {
-        assert!(cx.root_dir().lookup(&entry.name)?.inode() == entry.ino);
+        assert!(cx.root_dir().lookup_no_follow(&entry.name)?.inode() == entry.ino);
     }
 
     assert_eq!(

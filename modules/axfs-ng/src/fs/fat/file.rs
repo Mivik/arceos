@@ -1,7 +1,7 @@
 use core::{any::Any, mem, ops::Deref};
 
 use alloc::{sync::Arc, vec};
-use axfs_ng_vfs::{FileNode, FileNodeOps, FilesystemOps, Metadata, NodeOps, NodeType, VfsResult};
+use axfs_ng_vfs::{FileNode, FileNodeOps, FilesystemOps, Metadata, NodeOps, NodeType, VfsError, VfsResult};
 use fatfs::{Read, Seek, SeekFrom, Write};
 use lock_api::RawMutex;
 
@@ -122,5 +122,9 @@ impl<M: RawMutex + 'static> FileNodeOps<M> for FatFileNode<M> {
             }
             Ok(())
         }
+    }
+
+    fn set_symlink(&self, _target: &str) -> VfsResult<()> {
+        Err(VfsError::EPERM)
     }
 }
