@@ -157,7 +157,7 @@ impl<M: RawMutex> FsContext<M> {
 
     /// Writes the entire contents of a bytes vector into a file.
     pub fn write(&self, path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> VfsResult<()> {
-        File::new(self.resolve(path.as_ref())?, FileFlags::WRITE).write_all(data.as_ref())?;
+        File::create(self, path.as_ref())?.write_all(data.as_ref())?;
         Ok(())
     }
 

@@ -65,7 +65,7 @@ axsync = { path = "modules/axsync" }
 axtask = { path = "modules/axtask" }
 axdma = { path = "modules/axdma" }
 
-axfs-ng-vfs = { git = "https://github.com/Mivik/axfs-ng-vfs", rev = "f8b71f5" }
+axfs-ng-vfs = { git = "https://github.com/Mivik/axfs-ng-vfs", rev = "515f3d5" }
 
 [profile.release]
 lto = true

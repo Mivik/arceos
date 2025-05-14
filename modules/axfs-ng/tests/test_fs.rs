@@ -18,7 +18,7 @@ fn list_files(cx: &FsContext<RawMutex>, path: impl AsRef<Path>) -> VfsResult<Has
 }
 fn test_fs_read(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
     let mount = Mountpoint::new_root(fs);
-    let cx = FsContext::new(mount.root_location());
+    let cx: FsContext<spin::mutex::Mutex<()>> = FsContext::new(mount.root_location());
 
     let names = list_files(&cx, "/").unwrap();
     assert!(
@@ -83,6 +83,12 @@ fn test_fs_write(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
         cx.rename("temp2", "temp"),
         Err(VfsError::ENOTEMPTY)
     ));
+
+    cx.write("/test.txt", "hello world".as_bytes())?;
+    assert_eq!(
+        cx.read_to_string("/test.txt")?,
+        "hello world"
+    );
 
     Ok(())
 }
