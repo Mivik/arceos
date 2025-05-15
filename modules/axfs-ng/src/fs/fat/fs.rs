@@ -1,4 +1,4 @@
-use core::{cell::OnceCell, marker::PhantomPinned};
+use core::marker::PhantomPinned;
 
 use alloc::sync::Arc;
 use axdriver::AxBlockDevice;
@@ -26,13 +26,10 @@ impl FatFilesystemInner {
 
 pub struct FatFilesystem<M> {
     inner: Mutex<M, FatFilesystemInner>,
-    root_dir: OnceCell<DirEntry<M>>,
+    root_dir: Mutex<M, Option<DirEntry<M>>>,
 }
 
-unsafe impl<M> Send for FatFilesystem<M> {}
-unsafe impl<M> Sync for FatFilesystem<M> {}
-
-impl<M: RawMutex + 'static> FatFilesystem<M> {
+impl<M: RawMutex + Send + Sync + 'static> FatFilesystem<M> {
     pub fn new(dev: AxBlockDevice) -> Filesystem<M> {
         let mut inner = FatFilesystemInner {
             inner: ff::FileSystem::new(SeekableDisk::new(dev), fatfs::FsOptions::new())
@@ -43,7 +40,7 @@ impl<M: RawMutex + 'static> FatFilesystem<M> {
         let root_inode = inner.alloc_inode();
         let result = Arc::new(Self {
             inner: Mutex::new(inner),
-            root_dir: OnceCell::new(),
+            root_dir: Mutex::default(),
         });
 
         let root_dir = DirEntry::new_dir(
@@ -57,17 +54,18 @@ impl<M: RawMutex + 'static> FatFilesystem<M> {
             },
             Reference::root(),
         );
-        let _ = result.root_dir.set(root_dir);
+        *result.root_dir.lock() = Some(root_dir);
         Filesystem::new(result)
     }
-
+}
+impl<M: RawMutex> FatFilesystem<M> {
     pub(crate) fn lock(&self) -> MutexGuard<M, FatFilesystemInner> {
         self.inner.lock()
     }
 }
 
-impl<M: RawMutex> FilesystemOps<M> for FatFilesystem<M> {
+impl<M: RawMutex + Send + Sync> FilesystemOps<M> for FatFilesystem<M> {
     fn root_dir(&self) -> DirEntry<M> {
-        self.root_dir.get().unwrap().clone()
+        self.root_dir.lock().clone().unwrap()
     }
 }

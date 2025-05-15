@@ -2,7 +2,8 @@ use core::{any::Any, mem, ops::Deref};
 
 use alloc::{sync::Arc, vec};
 use axfs_ng_vfs::{
-    FileNode, FileNodeOps, FilesystemOps, Metadata, NodeOps, NodeType, VfsError, VfsResult,
+    FileNode, FileNodeOps, FilesystemOps, Metadata, MetadataUpdate, NodeOps, NodeType, VfsError,
+    VfsResult,
 };
 use fatfs::{Read, Seek, SeekFrom, Write};
 use lock_api::RawMutex;
@@ -10,7 +11,7 @@ use lock_api::RawMutex;
 use super::{
     FsRef, ff,
     fs::FatFilesystem,
-    util::{file_metadata, into_vfs_err},
+    util::{file_metadata, into_vfs_err, update_file_metadata},
 };
 
 pub struct FatFileNode<M: RawMutex + 'static> {
@@ -18,7 +19,7 @@ pub struct FatFileNode<M: RawMutex + 'static> {
     inner: FsRef<ff::File<'static>>,
     inode: u64,
 }
-impl<M: RawMutex + 'static> FatFileNode<M> {
+impl<M: RawMutex + Send + Sync + 'static> FatFileNode<M> {
     pub fn new(fs: Arc<FatFilesystem<M>>, file: ff::File, inode: u64) -> FileNode<M> {
         FileNode::new(Arc::new(Self {
             fs,
@@ -32,7 +33,7 @@ impl<M: RawMutex + 'static> FatFileNode<M> {
 unsafe impl<M: RawMutex + 'static> Send for FatFileNode<M> {}
 unsafe impl<M: RawMutex + 'static> Sync for FatFileNode<M> {}
 
-impl<M: RawMutex + 'static> NodeOps<M> for FatFileNode<M> {
+impl<M: RawMutex + Send + Sync + 'static> NodeOps<M> for FatFileNode<M> {
     fn inode(&self) -> u64 {
         self.inode
     }
@@ -41,6 +42,15 @@ impl<M: RawMutex + 'static> NodeOps<M> for FatFileNode<M> {
         let fs = self.fs.lock();
         let file = self.inner.borrow(&fs);
         Ok(file_metadata(file, NodeType::RegularFile))
+    }
+
+    fn update_metadata(&self, update: MetadataUpdate) -> VfsResult<()> {
+        // FatFS has no ownership & permission
+
+        let fs = self.fs.lock();
+        let file = self.inner.borrow_mut(&fs);
+        update_file_metadata(file, update);
+        Ok(())
     }
 
     fn filesystem(&self) -> &dyn FilesystemOps<M> {
@@ -63,7 +73,7 @@ impl<M: RawMutex + 'static> NodeOps<M> for FatFileNode<M> {
         self
     }
 }
-impl<M: RawMutex + 'static> FileNodeOps<M> for FatFileNode<M> {
+impl<M: RawMutex + Send + Sync + 'static> FileNodeOps<M> for FatFileNode<M> {
     fn read_at(&self, mut buf: &mut [u8], offset: u64) -> VfsResult<usize> {
         let fs = self.fs.lock();
         let file = self.inner.borrow_mut(&fs);

@@ -3,7 +3,8 @@ use core::any::Any;
 use alloc::{borrow::ToOwned, string::String, sync::Arc};
 use axfs_ng_vfs::{
     DirEntry, DirEntrySink, DirNode, DirNodeOps, FileNode, FileNodeOps, FilesystemOps, Metadata,
-    NodeOps, NodePermission, NodeType, Reference, VfsError, VfsResult, WeakDirEntry,
+    MetadataUpdate, NodeOps, NodePermission, NodeType, Reference, VfsError, VfsResult,
+    WeakDirEntry,
 };
 use lock_api::RawMutex;
 use lwext4_rust::{FileAttr, InodeType};
@@ -73,6 +74,27 @@ impl<M: RawMutex + Send + Sync + 'static> NodeOps<M> for Inode<M> {
             mtime: attr.mtime,
             ctime: attr.ctime,
         })
+    }
+
+    fn update_metadata(&self, update: MetadataUpdate) -> VfsResult<()> {
+        let mut fs = self.fs.lock();
+        fs.with_inode_ref(self.ino, |inode| {
+            if let Some(mode) = update.mode {
+                inode.set_mode((inode.mode() & !0xfff) | (mode.bits() as u32));
+            }
+            if let Some((uid, gid)) = update.owner {
+                inode.set_owner(uid as _, gid as _);
+            }
+            if let Some(atime) = update.atime {
+                inode.set_atime(&atime);
+            }
+            if let Some(mtime) = update.mtime {
+                inode.set_mtime(&mtime);
+            }
+            Ok(())
+        })
+        .map_err(into_vfs_err)?;
+        Ok(())
     }
 
     fn len(&self) -> VfsResult<u64> {

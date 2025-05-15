@@ -1,8 +1,8 @@
 use core::time::Duration;
 
 use alloc::string::String;
-use axfs_ng_vfs::{Metadata, NodePermission, NodeType, VfsError};
-use chrono::{DateTime, NaiveDate, TimeZone, Utc};
+use axfs_ng_vfs::{Metadata, MetadataUpdate, NodePermission, NodeType, VfsError};
+use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Timelike, Utc};
 
 use super::ff;
 
@@ -55,6 +55,21 @@ pub fn dos_to_unix(date: fatfs::DateTime) -> Duration {
         .unwrap_or_default()
 }
 
+pub fn unix_to_dos(datetime: Duration) -> fatfs::DateTime {
+    let dt = DateTime::UNIX_EPOCH + datetime;
+    let dt = dt.naive_local();
+
+    fatfs::DateTime::new(
+        fatfs::Date::new(dt.year() as _, dt.month() as _, dt.day() as _),
+        fatfs::Time::new(
+            dt.hour() as _,
+            dt.minute() as _,
+            dt.second() as _,
+            dt.and_utc().timestamp_subsec_millis() as _,
+        ),
+    )
+}
+
 pub fn file_metadata(file: &ff::File, node_type: NodeType) -> Metadata {
     let size = file.size().unwrap_or(0) as u64;
     Metadata {
@@ -78,6 +93,17 @@ pub fn file_metadata(file: &ff::File, node_type: NodeType) -> Metadata {
         )),
         mtime: dos_to_unix(file.modified()),
         ctime: dos_to_unix(file.created()),
+    }
+}
+
+pub fn update_file_metadata(file: &mut ff::File, update: MetadataUpdate) {
+    if let Some(atime) = update.atime {
+        #[allow(deprecated)]
+        file.set_accessed(unix_to_dos(atime).date);
+    }
+    if let Some(mtime) = update.mtime {
+        #[allow(deprecated)]
+        file.set_modified(unix_to_dos(mtime));
     }
 }
 

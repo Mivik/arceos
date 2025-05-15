@@ -2,8 +2,8 @@ use core::{any::Any, mem, ops::Deref, time::Duration};
 
 use alloc::{string::String, sync::Arc};
 use axfs_ng_vfs::{
-    DirEntry, DirEntrySink, DirNode, DirNodeOps, FilesystemOps, Metadata, NodeOps, NodePermission,
-    NodeType, Reference, VfsError, VfsResult, WeakDirEntry,
+    DirEntry, DirEntrySink, DirNode, DirNodeOps, FilesystemOps, Metadata, MetadataUpdate, NodeOps,
+    NodePermission, NodeType, Reference, VfsError, VfsResult, WeakDirEntry,
 };
 use lock_api::RawMutex;
 
@@ -20,7 +20,7 @@ pub struct FatDirNode<M: RawMutex + 'static> {
     inode: u64,
     this: WeakDirEntry<M>,
 }
-impl<M: RawMutex + 'static> FatDirNode<M> {
+impl<M: RawMutex + Send + Sync + 'static> FatDirNode<M> {
     pub fn new(
         fs: Arc<FatFilesystem<M>>,
         dir: ff::Dir,
@@ -61,12 +61,11 @@ impl<M: RawMutex + 'static> FatDirNode<M> {
 unsafe impl<M: RawMutex + 'static> Send for FatDirNode<M> {}
 unsafe impl<M: RawMutex + 'static> Sync for FatDirNode<M> {}
 
-impl<M: RawMutex + 'static> NodeOps<M> for FatDirNode<M> {
+impl<M: RawMutex + Send + Sync + 'static> NodeOps<M> for FatDirNode<M> {
     fn inode(&self) -> u64 {
         self.inode
     }
 
-    /// Get the metadata of the file.
     fn metadata(&self) -> VfsResult<Metadata> {
         let fs = self.fs.lock();
         let dir = self.inner.borrow(&fs);
@@ -93,6 +92,11 @@ impl<M: RawMutex + 'static> NodeOps<M> for FatDirNode<M> {
         })
     }
 
+    fn update_metadata(&self, _update: MetadataUpdate) -> VfsResult<()> {
+        // TODO: update metadata on directory
+        Ok(())
+    }
+
     fn filesystem(&self) -> &dyn FilesystemOps<M> {
         self.fs.deref()
     }
@@ -105,7 +109,7 @@ impl<M: RawMutex + 'static> NodeOps<M> for FatDirNode<M> {
         self
     }
 }
-impl<M: RawMutex + 'static> DirNodeOps<M> for FatDirNode<M> {
+impl<M: RawMutex + Send + Sync + 'static> DirNodeOps<M> for FatDirNode<M> {
     fn read_dir(&self, offset: u64, sink: &mut dyn DirEntrySink) -> VfsResult<usize> {
         let mut fs = self.fs.lock();
         let dir = self.inner.borrow(&fs);
