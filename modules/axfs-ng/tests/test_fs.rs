@@ -141,6 +141,10 @@ fn test_mount() {
     let cx = FsContext::new(mount.root_location());
     cx.resolve("a").unwrap().mount(&sub_fs);
 
+    let mt = cx.resolve("a").unwrap();
+    assert!(!mt.is_mountpoint() && mt.is_root_of_mount());
+    assert_eq!(mt.filesystem().name(), "vfat");
+
     assert_eq!(
         cx.read_to_string("/a/../a/very-long-dir-name/very-long-file-name.txt")
             .unwrap(),

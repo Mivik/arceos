@@ -42,6 +42,10 @@ unsafe impl<M> Send for Ext4Filesystem<M> {}
 unsafe impl<M> Sync for Ext4Filesystem<M> {}
 
 impl<M: RawMutex + 'static> FilesystemOps<M> for Ext4Filesystem<M> {
+    fn name(&self) -> &str {
+        "ext4"
+    }
+
     fn root_dir(&self) -> DirEntry<M> {
         self.root_dir.get().unwrap().clone()
     }

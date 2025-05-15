@@ -65,6 +65,10 @@ impl<M: RawMutex> FatFilesystem<M> {
 }
 
 impl<M: RawMutex + Send + Sync> FilesystemOps<M> for FatFilesystem<M> {
+    fn name(&self) -> &str {
+        "vfat"
+    }
+
     fn root_dir(&self) -> DirEntry<M> {
         self.root_dir.lock().clone().unwrap()
     }
