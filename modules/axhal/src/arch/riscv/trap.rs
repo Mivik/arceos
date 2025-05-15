@@ -72,6 +72,7 @@ fn riscv_trap_handler(tf: &mut TrapFrame, from_user: bool) {
             }
         }
         crate::trap::post_trap_callback(tf, from_user);
+        super::disable_irqs();
     } else {
         panic!(
             "Unknown trap {:?} @ {:#x}:\n{:#x?}",
