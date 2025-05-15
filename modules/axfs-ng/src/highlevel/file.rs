@@ -1,6 +1,6 @@
 use core::fmt;
 
-use axfs_ng_vfs::{path::Path, FileNode, Location, Metadata, NodePermission, VfsError, VfsResult};
+use axfs_ng_vfs::{FileNode, Location, Metadata, NodePermission, VfsError, VfsResult, path::Path};
 use axio::SeekFrom;
 use lock_api::RawMutex;
 
@@ -8,7 +8,7 @@ use super::FsContext;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy)]
-    pub(crate) struct FileFlags: u8 {
+    pub struct FileFlags: u8 {
         const READ = 1;
         const WRITE = 2;
         const EXECUTE = 4;
@@ -269,7 +269,7 @@ impl<M: RawMutex> File<M> {
             .and_then(OpenResult::into_file)
     }
 
-    pub(crate) fn access(&self, cap: FileFlags) -> VfsResult<&FileNode<M>> {
+    pub fn access(&self, cap: FileFlags) -> VfsResult<&FileNode<M>> {
         if self.flags.contains(cap) {
             self.inner.entry().as_file()
         } else {
