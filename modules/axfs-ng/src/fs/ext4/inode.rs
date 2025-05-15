@@ -161,16 +161,13 @@ impl<M: RawMutex + Send + Sync + 'static> DirNodeOps<M> for Inode<M> {
             let name = core::str::from_utf8(entry.name())
                 .map_err(|_| VfsError::EINVAL)?
                 .to_owned();
-            if !sink.accept(
-                &name,
-                entry.ino() as u64,
-                into_vfs_type(entry.inode_type()),
-                reader.offset() + entry.len() as u64,
-            ) {
+            let ino = entry.ino() as u64;
+            let node_type = into_vfs_type(entry.inode_type());
+            reader.next().map_err(into_vfs_err)?;
+            if !sink.accept(&name, ino, node_type, reader.offset()) {
                 break;
             }
             count += 1;
-            reader.next().map_err(into_vfs_err)?;
         }
         Ok(count)
     }
