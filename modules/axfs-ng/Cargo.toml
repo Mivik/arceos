@@ -35,7 +35,6 @@ git = "https://github.com/Mivik/lwext4_rust"
 rev = "5b57bce"
 default-features = false
 optional = true
-features = ["print"]
 
 [dependencies.fatfs]
 git = "https://github.com/Mivik/rust-fatfs"
