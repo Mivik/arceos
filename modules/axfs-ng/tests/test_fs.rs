@@ -85,10 +85,11 @@ fn test_fs_write(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
     ));
 
     cx.write("/test.txt", "hello world".as_bytes())?;
-    assert_eq!(
-        cx.read_to_string("/test.txt")?,
-        "hello world"
-    );
+    assert_eq!(cx.read_to_string("/test.txt")?, "hello world");
+
+    cx.create_dir("test_dir", NodePermission::from_bits_truncate(0o755))?;
+    cx.rename("test_dir", "test")?;
+    cx.remove_dir("test")?;
 
     Ok(())
 }
@@ -141,7 +142,8 @@ fn test_mount() {
     cx.resolve("a").unwrap().mount(&sub_fs);
 
     assert_eq!(
-        cx.read_to_string("/a/../a/very-long-dir-name/very-long-file-name.txt").unwrap(),
+        cx.read_to_string("/a/../a/very-long-dir-name/very-long-file-name.txt")
+            .unwrap(),
         "Rust is cool!\n"
     );
 }
