@@ -70,7 +70,7 @@ impl<M: RawMutex + Send + Sync + 'static> NodeOps<M> for FatDirNode<M> {
         let fs = self.fs.lock();
         let dir = self.inner.borrow(&fs);
         if let Some(file) = dir.as_file() {
-            return Ok(file_metadata(file, NodeType::Directory));
+            return Ok(file_metadata(&fs, file, NodeType::Directory));
         }
 
         // root directory
@@ -84,7 +84,7 @@ impl<M: RawMutex + Send + Sync + 'static> NodeOps<M> for FatDirNode<M> {
             uid: 0,
             gid: 0,
             size: block_size,
-            block_size: block_size,
+            block_size,
             blocks: 1,
             atime: Duration::default(),
             mtime: Duration::default(),

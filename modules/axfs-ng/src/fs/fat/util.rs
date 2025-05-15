@@ -4,7 +4,7 @@ use alloc::string::String;
 use axfs_ng_vfs::{Metadata, MetadataUpdate, NodePermission, NodeType, VfsError};
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Timelike, Utc};
 
-use super::ff;
+use super::{ff, fs::FatFilesystemInner};
 
 #[derive(Clone)]
 pub struct CaseInsensitiveString(pub String);
@@ -70,8 +70,9 @@ pub fn unix_to_dos(datetime: Duration) -> fatfs::DateTime {
     )
 }
 
-pub fn file_metadata(file: &ff::File, node_type: NodeType) -> Metadata {
+pub fn file_metadata(fs: &FatFilesystemInner, file: &ff::File, node_type: NodeType) -> Metadata {
     let size = file.size().unwrap_or(0) as u64;
+    let block_size = fs.inner.bytes_per_sector();
     Metadata {
         // TODO: inode
         inode: 1,
@@ -82,11 +83,11 @@ pub fn file_metadata(file: &ff::File, node_type: NodeType) -> Metadata {
         uid: 0,
         gid: 0,
         size,
-        block_size: 512,
+        block_size: block_size as _,
         // TODO: The correct block count should be obtained from
         // `file.extents()`. However it would be costly. This implementation
         // would be enough for now.
-        blocks: size / 512,
+        blocks: size / block_size as u64,
         atime: dos_to_unix(fatfs::DateTime::new(
             file.accessed(),
             fatfs::Time::new(0, 0, 0, 0),

@@ -41,7 +41,7 @@ impl<M: RawMutex + Send + Sync + 'static> NodeOps<M> for FatFileNode<M> {
     fn metadata(&self) -> VfsResult<Metadata> {
         let fs = self.fs.lock();
         let file = self.inner.borrow(&fs);
-        Ok(file_metadata(file, NodeType::RegularFile))
+        Ok(file_metadata(&fs, file, NodeType::RegularFile))
     }
 
     fn update_metadata(&self, update: MetadataUpdate) -> VfsResult<()> {

@@ -2,13 +2,15 @@ use core::marker::PhantomPinned;
 
 use alloc::sync::Arc;
 use axdriver::AxBlockDevice;
-use axfs_ng_vfs::{DirEntry, Filesystem, FilesystemOps, Reference};
+use axfs_ng_vfs::{
+    DirEntry, Filesystem, FilesystemOps, Reference, StatFs, VfsResult, path::MAX_NAME_LEN,
+};
 use lock_api::{Mutex, MutexGuard, RawMutex};
 use slab::Slab;
 
 use crate::disk::SeekableDisk;
 
-use super::{dir::FatDirNode, ff};
+use super::{dir::FatDirNode, ff, util::into_vfs_err};
 
 pub struct FatFilesystemInner {
     pub inner: ff::FileSystem,
@@ -71,5 +73,24 @@ impl<M: RawMutex + Send + Sync> FilesystemOps<M> for FatFilesystem<M> {
 
     fn root_dir(&self) -> DirEntry<M> {
         self.root_dir.lock().clone().unwrap()
+    }
+
+    fn stat(&self) -> VfsResult<StatFs> {
+        let fs = self.inner.lock();
+        let stats = fs.inner.stats().map_err(into_vfs_err)?;
+        Ok(StatFs {
+            fs_type: 0x65735546, // fuse
+            block_size: stats.cluster_size() as _,
+            blocks: stats.total_clusters() as _,
+            blocks_free: stats.free_clusters() as _,
+            blocks_available: stats.free_clusters() as _,
+
+            file_count: 0,
+            free_file_count: 0,
+
+            name_length: MAX_NAME_LEN as _,
+            fragment_size: 0,
+            mount_flags: 0,
+        })
     }
 }

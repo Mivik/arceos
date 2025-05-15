@@ -2,7 +2,9 @@ use core::cell::OnceCell;
 
 use alloc::sync::Arc;
 use axdriver::AxBlockDevice;
-use axfs_ng_vfs::{DirEntry, DirNode, Filesystem, FilesystemOps, Reference, VfsResult};
+use axfs_ng_vfs::{
+    DirEntry, DirNode, Filesystem, FilesystemOps, Reference, StatFs, VfsResult, path::MAX_NAME_LEN,
+};
 use lock_api::{Mutex, MutexGuard, RawMutex};
 use lwext4_rust::ffi::EXT4_ROOT_INO;
 
@@ -48,5 +50,24 @@ impl<M: RawMutex + 'static> FilesystemOps<M> for Ext4Filesystem<M> {
 
     fn root_dir(&self) -> DirEntry<M> {
         self.root_dir.get().unwrap().clone()
+    }
+
+    fn stat(&self) -> VfsResult<StatFs> {
+        let mut fs = self.lock();
+        let stat = fs.stat().map_err(into_vfs_err)?;
+        Ok(StatFs {
+            fs_type: 0xef53,
+            block_size: stat.block_size as _,
+            blocks: stat.blocks_count,
+            blocks_free: stat.free_blocks_count,
+            blocks_available: stat.free_blocks_count,
+
+            file_count: stat.inodes_count as _,
+            free_file_count: stat.free_inodes_count as _,
+
+            name_length: MAX_NAME_LEN as _,
+            fragment_size: 0,
+            mount_flags: 0,
+        })
     }
 }
