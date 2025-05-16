@@ -1,7 +1,7 @@
 use core::time::Duration;
 
 use alloc::string::String;
-use axfs_ng_vfs::{Metadata, MetadataUpdate, NodePermission, NodeType, VfsError};
+use axfs_ng_vfs::{DeviceId, Metadata, MetadataUpdate, NodePermission, NodeType, VfsError};
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Timelike, Utc};
 
 use super::{ff, fs::FatFilesystemInner};
@@ -88,6 +88,7 @@ pub fn file_metadata(fs: &FatFilesystemInner, file: &ff::File, node_type: NodeTy
         // `file.extents()`. However it would be costly. This implementation
         // would be enough for now.
         blocks: size / block_size as u64,
+        rdev: DeviceId::default(),
         atime: dos_to_unix(fatfs::DateTime::new(
             file.accessed(),
             fatfs::Time::new(0, 0, 0, 0),

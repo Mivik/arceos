@@ -2,8 +2,7 @@ use core::{any::Any, mem, ops::Deref, time::Duration};
 
 use alloc::{string::String, sync::Arc};
 use axfs_ng_vfs::{
-    DirEntry, DirEntrySink, DirNode, DirNodeOps, FilesystemOps, Metadata, MetadataUpdate, NodeOps,
-    NodePermission, NodeType, Reference, VfsError, VfsResult, WeakDirEntry,
+    DeviceId, DirEntry, DirEntrySink, DirNode, DirNodeOps, FilesystemOps, Metadata, MetadataUpdate, NodeOps, NodePermission, NodeType, Reference, VfsError, VfsResult, WeakDirEntry
 };
 use lock_api::RawMutex;
 
@@ -86,6 +85,7 @@ impl<M: RawMutex + Send + Sync + 'static> NodeOps<M> for FatDirNode<M> {
             size: block_size,
             block_size,
             blocks: 1,
+            rdev: DeviceId::default(),
             atime: Duration::default(),
             mtime: Duration::default(),
             ctime: Duration::default(),
