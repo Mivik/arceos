@@ -56,6 +56,7 @@ pub struct OpenOptions {
     create: bool,
     create_new: bool,
     directory: bool,
+    user: Option<(u32, u32)>,
     // system-specific
     custom_flags: i32,
     mode: u32,
@@ -73,6 +74,7 @@ impl OpenOptions {
             create: false,
             create_new: false,
             directory: false,
+            user: None,
             // system-specific
             custom_flags: 0,
             mode: 0o666,
@@ -127,6 +129,12 @@ impl OpenOptions {
         self
     }
 
+    /// Sets the user and group id to open the file with.
+    pub fn user(&mut self, uid: u32, gid: u32) -> &mut Self {
+        self.user = Some((uid, gid));
+        self
+    }
+
     /// Pass custom flags to the flags argument of open.
     pub fn custom_flags(&mut self, flags: i32) -> &mut Self {
         self.custom_flags = flags;
@@ -159,6 +167,7 @@ impl OpenOptions {
                 self.create,
                 self.create_new,
                 NodePermission::from_bits_truncate(self.mode as _),
+                self.user,
             )?
             .clone();
         if self.directory {
@@ -220,6 +229,7 @@ impl fmt::Debug for OpenOptions {
             create,
             create_new,
             directory,
+            user,
             custom_flags,
             mode,
         } = self;
@@ -232,6 +242,7 @@ impl fmt::Debug for OpenOptions {
             .field("create", create)
             .field("create_new", create_new)
             .field("directory", directory)
+            .field("user", user)
             .field("custom_flags", custom_flags)
             .field("mode", mode)
             .finish()
