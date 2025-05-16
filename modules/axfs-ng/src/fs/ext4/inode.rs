@@ -11,7 +11,7 @@ use lwext4_rust::{FileAttr, InodeType};
 
 use super::{
     Ext4Filesystem,
-    util::{into_vfs_err, into_vfs_type},
+    util::{LwExt4Filesystem, into_vfs_err, into_vfs_type},
 };
 
 pub struct Inode<M> {
@@ -45,6 +45,12 @@ impl<M: RawMutex + Send + Sync + 'static> Inode<M> {
                 reference,
             )
         }
+    }
+
+    fn lookup_locked(&self, fs: &mut LwExt4Filesystem, name: &str) -> VfsResult<DirEntry<M>> {
+        let mut result = fs.lookup(self.ino, name).map_err(into_vfs_err)?;
+        let entry = result.entry();
+        Ok(self.create_entry(&entry, name))
     }
 }
 
@@ -174,9 +180,7 @@ impl<M: RawMutex + Send + Sync + 'static> DirNodeOps<M> for Inode<M> {
 
     fn lookup(&self, name: &str) -> VfsResult<DirEntry<M>> {
         let mut fs = self.fs.lock();
-        let mut result = fs.lookup(self.ino, name).map_err(into_vfs_err)?;
-        let entry = result.entry();
-        Ok(self.create_entry(&entry, name))
+        self.lookup_locked(&mut fs, name)
     }
 
     fn create(
@@ -223,7 +227,7 @@ impl<M: RawMutex + Send + Sync + 'static> DirNodeOps<M> for Inode<M> {
         let mut fs = self.fs.lock();
         fs.link(self.ino, name, node.inode() as _)
             .map_err(into_vfs_err)?;
-        self.lookup(name)
+        self.lookup_locked(&mut fs, name)
     }
 
     fn unlink(&self, name: &str) -> VfsResult<()> {

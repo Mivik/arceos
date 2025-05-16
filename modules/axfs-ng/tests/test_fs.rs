@@ -91,6 +91,15 @@ fn test_fs_write(fs: &Filesystem<RawMutex>) -> VfsResult<()> {
     cx.rename("test_dir", "test")?;
     cx.remove_dir("test")?;
 
+    println!("---------------------");
+
+    if cx.link("/test.txt", "/test_link").is_ok() {
+        assert_eq!(cx.read_to_string("/test_link")?, "hello world");
+    }
+    if cx.symlink("/test.txt", "/test_symlink").is_ok() {
+        assert_eq!(cx.read_to_string("/test_symlink")?, "hello world");
+    }
+
     Ok(())
 }
 
