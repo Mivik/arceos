@@ -2,7 +2,8 @@ use core::{any::Any, mem, ops::Deref, time::Duration};
 
 use alloc::{string::String, sync::Arc};
 use axfs_ng_vfs::{
-    DeviceId, DirEntry, DirEntrySink, DirNode, DirNodeOps, FilesystemOps, Metadata, MetadataUpdate, NodeOps, NodePermission, NodeType, Reference, VfsError, VfsResult, WeakDirEntry
+    DeviceId, DirEntry, DirEntrySink, DirNode, DirNodeOps, FilesystemOps, Metadata, MetadataUpdate,
+    NodeOps, NodePermission, NodeType, Reference, VfsError, VfsResult, WeakDirEntry,
 };
 use lock_api::RawMutex;
 
@@ -204,7 +205,9 @@ impl<M: RawMutex + Send + Sync + 'static> DirNodeOps<M> for FatDirNode<M> {
         // The default implementation throws EEXIST if dst exists, so we need to
         // handle it
         match dst_dir.inner.borrow(&fs).remove(dst_name) {
-            Ok(_) => {}
+            Ok(_) => {
+                log::warn!("对 I removed {}", dst_name);
+            }
             Err(fatfs::Error::NotFound) => {}
             Err(err) => return Err(into_vfs_err(err)),
         }
