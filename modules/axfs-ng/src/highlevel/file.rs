@@ -160,16 +160,22 @@ impl OpenOptions {
         }
         let flags = self.to_flags()?;
 
-        let (parent, name) = context.resolve_parent(path.as_ref())?;
-        let loc = parent
-            .open_file_or_create(
-                &name,
-                self.create,
-                self.create_new,
-                NodePermission::from_bits_truncate(self.mode as _),
-                self.user,
-            )?
-            .clone();
+        let loc = match context.resolve_parent(path.as_ref()) {
+            Ok((parent, name)) => parent
+                .open_file_or_create(
+                    &name,
+                    self.create,
+                    self.create_new,
+                    NodePermission::from_bits_truncate(self.mode as _),
+                    self.user,
+                )?
+                .clone(),
+            Err(VfsError::EINVAL) => {
+                // root directory
+                context.root_dir().clone()
+            }
+            Err(err) => return Err(err),
+        };
         if self.directory {
             if flags.contains(FileFlags::WRITE) {
                 return Err(VfsError::EISDIR);
