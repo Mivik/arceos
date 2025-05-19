@@ -9,7 +9,7 @@ use memory_addr::{
 };
 use memory_set::{MemoryArea, MemorySet};
 
-use crate::backend::Backend;
+use crate::backend::{Backend, SharedPages};
 use crate::mapping_err_to_ax_err;
 
 /// The virtual memory address space.
@@ -180,8 +180,8 @@ impl AddrSpace {
         start: VirtAddr,
         size: usize,
         flags: MappingFlags,
-        source: Option<Arc<[PhysAddr]>>,
-    ) -> AxResult<Arc<[PhysAddr]>> {
+        source: Option<Arc<SharedPages>>,
+    ) -> AxResult<Arc<SharedPages>> {
         self.validate_region(start, size)?;
 
         let area = MemoryArea::new(
@@ -460,7 +460,9 @@ impl AddrSpace {
                             Err(_) => return Err(AxError::BadAddress),
                         }
                     }
-                    Err(_) => return Err(AxError::BadAddress),
+                    Err(_) => {
+                        return Err(AxError::BadAddress);
+                    }
                 };
                 unsafe {
                     core::ptr::copy_nonoverlapping(

@@ -1,6 +1,8 @@
 //! Memory mapping backends.
 
-use ::alloc::sync::Arc;
+use core::ops::Deref;
+
+use ::alloc::{sync::Arc, vec::Vec};
 use axhal::paging::{MappingFlags, PageTable};
 use memory_addr::{PhysAddr, VirtAddr};
 use memory_set::MappingBackend;
@@ -8,6 +10,21 @@ use memory_set::MappingBackend;
 mod alloc;
 mod linear;
 mod shared;
+
+pub struct SharedPages(pub Vec<PhysAddr>);
+impl Deref for SharedPages {
+    type Target = [PhysAddr];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl Drop for SharedPages {
+    fn drop(&mut self) {
+        for frame in &self.0 {
+            alloc::dealloc_frame(*frame);
+        }
+    }
+}
 
 /// A unified enum type for different memory mapping backends.
 ///
@@ -39,7 +56,7 @@ pub enum Backend {
         populate: bool,
     },
     Shared {
-        pages: Arc<[PhysAddr]>,
+        pages: Arc<SharedPages>,
     },
 }
 
