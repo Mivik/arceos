@@ -154,13 +154,14 @@ fn test_mount() {
     let disk = RamDisk::from(&std::fs::read("resources/fat16.img").unwrap());
     let sub_fs = fs::fat::FatFilesystem::<RawMutex>::new(disk);
 
-    let mount = Mountpoint::new_root(&fs);
+    let mount = Mountpoint::new(&fs, None);
     let cx = FsContext::new(mount.root_location());
     cx.resolve("a").unwrap().mount(&sub_fs);
 
     let mt = cx.resolve("a").unwrap();
     assert!(!mt.is_mountpoint() && mt.is_root_of_mount());
     assert_eq!(mt.filesystem().name(), "vfat");
+    assert_eq!(mt.absolute_path().unwrap().to_string(), "/a");
 
     assert_eq!(
         cx.read_to_string("/a/../a/very-long-dir-name/very-long-file-name.txt")
